@@ -19,6 +19,7 @@ on:
 permissions:
   contents: read
   packages: read
+  issues: write
 
 env:
   IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
