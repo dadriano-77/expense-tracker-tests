@@ -1,0 +1,8 @@
+# ZAP alert suppression rules
+# Format: <alert-id>	<action>	<reason>
+# Actions: IGNORE, WARN
+# Find alert IDs in zap-report.json under $.site[0].alerts[*].pluginid
+#
+# After your first run, download the pipeline-report artifact and add
+# any informational/expected alerts here. Example:
+# 10049	IGNORE	Storable and Cacheable Content — informational only

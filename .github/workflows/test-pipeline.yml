@@ -1,0 +1,241 @@
+name: Test Pipeline
+
+on:
+  repository_dispatch:
+    types: [app-deployed]
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to test'
+        required: false
+        default: 'latest'
+
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  IMAGE_TAG: ${{ github.event.client_payload.image_tag || inputs.image_tag || 'latest' }}
+  IMAGE_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  test-pipeline:
+    name: Full Test Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Setup ─────────────────────────────────────────────────────────────
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create reports directories
+        run: mkdir -p reports/{contract,e2e,performance,security}
+
+      # ── Start application ──────────────────────────────────────────────────
+      - name: Start application containers
+        env:
+          BACKEND_IMAGE: ghcr.io/${{ env.IMAGE_OWNER }}/expense-tracker-backend:${{ env.IMAGE_TAG }}
+          FRONTEND_IMAGE: ghcr.io/${{ env.IMAGE_OWNER }}/expense-tracker-frontend:${{ env.IMAGE_TAG }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: docker compose -f infra/docker-compose.yml up -d
+
+      - name: Wait for backend
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3001/health && echo " backend ready" && break
+            echo "Waiting for backend ($i/30)..."
+            sleep 2
+          done
+          curl -sf http://localhost:3001/health || {
+            docker compose -f infra/docker-compose.yml logs
+            exit 1
+          }
+
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5173 && echo " frontend ready" && break
+            sleep 2
+          done
+
+      # ── Stage 1: Contract Tests ────────────────────────────────────────────
+      - name: Install Newman
+        run: npm install -g newman newman-reporter-htmlextra
+
+      - name: Contract Tests (Newman)
+        id: contract
+        continue-on-error: true
+        run: |
+          EXIT=0
+
+          newman run contract/expenses-api.collection.json \
+            --env-var baseUrl=http://localhost:3001 \
+            --reporters cli,htmlextra,json \
+            --reporter-htmlextra-export reports/contract/expenses-api-report.html \
+            --reporter-htmlextra-title 'Expenses API Contract Tests' \
+            --reporter-json-export reports/contract/expenses-results.json \
+            --color on || EXIT=$?
+
+          # Add more collections here as needed:
+          # newman run contract/categories-api.collection.json \
+          #   --env-var baseUrl=http://localhost:3001 \
+          #   ...
+
+          exit $EXIT
+
+      # ── Stage 2: E2E Tests ─────────────────────────────────────────────────
+      - name: Install Playwright dependencies
+        run: npm ci --prefix e2e
+
+      - name: Install Playwright browsers
+        run: npx --prefix e2e playwright install --with-deps chromium
+
+      - name: E2E Tests (Playwright)
+        id: e2e
+        continue-on-error: true
+        env:
+          BASE_URL: http://localhost:5173
+          PLAYWRIGHT_HTML_REPORT: reports/e2e
+        run: |
+          cd e2e
+          npx playwright test --config playwright.config.ts \
+            2>&1 | tee ../reports/e2e/output.log
+
+      # ── Stage 3: Performance Tests ─────────────────────────────────────────
+      - name: Install k6
+        run: |
+          curl -s https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Performance Tests (k6)
+        id: perf
+        continue-on-error: true
+        run: |
+          k6 run \
+            --env BASE_URL=http://localhost:3001 \
+            --summary-export=reports/performance/summary.json \
+            performance/load.js \
+            2>&1 | tee reports/performance/output.log
+
+      # ── Stage 4: Security Scan (OWASP ZAP) ────────────────────────────────
+      - name: Security Scan (OWASP ZAP)
+        id: security
+        continue-on-error: true
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: 'http://localhost:3001'
+          cmd_options: '-I'
+          fail_action: false
+          issue_title: ''
+          token: ${{ secrets.GITHUB_TOKEN }}
+          rules_file_name: '.zap/rules.tsv'
+          artifact_name: ''
+
+      - name: Move ZAP JSON to reports dir
+        if: always()
+        run: |
+          [ -f report_json.json ] && cp report_json.json reports/security/zap-report.json || true
+          [ -f report_html.html ] && cp report_html.html reports/security/zap-report.html || true
+
+      # ── Generate aggregate report ──────────────────────────────────────────
+      - name: Write pipeline metadata
+        if: always()
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const stages = [
+            { name: 'Contract Tests (Newman)',    outcome: '${{ steps.contract.outcome }}' },
+            { name: 'E2E Tests (Playwright)',     outcome: '${{ steps.e2e.outcome }}' },
+            { name: 'Performance Tests (k6)',     outcome: '${{ steps.perf.outcome }}' },
+            { name: 'Security Scan (OWASP ZAP)', outcome: '${{ steps.security.outcome }}' },
+          ].map(s => ({
+            name: s.name,
+            status:     s.outcome === 'success' ? 'PASS'
+                      : s.outcome === 'failure' ? 'FAIL'
+                      : 'SKIP',
+            durationMs: 0,
+          }));
+          const meta = {
+            runAt:         new Date().toISOString(),
+            durationMs:    0,
+            overallStatus: stages.some(s => s.status === 'FAIL') ? 'FAIL' : 'PASS',
+            stages,
+          };
+          fs.writeFileSync('reports/pipeline-run.json', JSON.stringify(meta, null, 2));
+          EOF
+
+      - name: Generate HTML report
+        if: always()
+        run: node generate-report.js reports
+
+      # ── Upload artifacts ───────────────────────────────────────────────────
+      - name: Upload pipeline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-report-${{ github.run_number }}
+          path: reports/
+          retention-days: 30
+
+      # ── Job summary ────────────────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let meta;
+            try {
+              meta = JSON.parse(fs.readFileSync('reports/pipeline-run.json', 'utf8'));
+            } catch {
+              core.summary.addHeading('Pipeline report unavailable').write();
+              return;
+            }
+            const icon = meta.overallStatus === 'PASS' ? '✅' : '❌';
+            const rows = (meta.stages || []).map(s => [
+              s.name,
+              s.status === 'PASS' ? '✅ PASS' : s.status === 'FAIL' ? '❌ FAIL' : '⏭ SKIP',
+              s.durationMs ? `${(s.durationMs / 1000).toFixed(1)}s` : '—',
+            ]);
+            await core.summary
+              .addHeading(`${icon} Pipeline — ${meta.overallStatus}`)
+              .addTable([
+                [
+                  { data: 'Stage',    header: true },
+                  { data: 'Result',   header: true },
+                  { data: 'Duration', header: true },
+                ],
+                ...rows,
+              ])
+              .addRaw(`\n**Triggered by:** \`${{ github.event.client_payload.triggered_by || github.actor }}\`  \n`)
+              .addRaw(`**Image tag:** \`${{ env.IMAGE_TAG }}\`  \n`)
+              .addRaw(`**Run at:** ${meta.runAt}  \n`)
+              .write();
+
+      # ── Fail the job if any stage failed ──────────────────────────────────
+      - name: Propagate failures
+        if: always()
+        run: |
+          FAILED=0
+          [ "${{ steps.contract.outcome }}" = "failure" ] && FAILED=1
+          [ "${{ steps.e2e.outcome }}"      = "failure" ] && FAILED=1
+          [ "${{ steps.perf.outcome }}"     = "failure" ] && FAILED=1
+          [ $FAILED -eq 1 ] && exit 1 || exit 0
