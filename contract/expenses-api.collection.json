@@ -4,11 +4,11 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl",  "value": "http://localhost:3001" },
-    { "key": "token",    "value": "" },
-    { "key": "expenseId",    "value": "" },
-    { "key": "categoryId",   "value": "" },
-    { "key": "budgetId",     "value": "" }
+    { "key": "baseUrl",     "value": "http://localhost:3001" },
+    { "key": "token",       "value": "" },
+    { "key": "expenseId",   "value": "" },
+    { "key": "categoryId",  "value": "" },
+    { "key": "budgetId",    "value": "" }
   ],
   "item": [
     {
@@ -192,11 +192,12 @@
             "script": {
               "type": "text/javascript",
               "exec": [
+                "const json = pm.response.json();",
                 "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                "pm.test('Returns an array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                "pm.test('Has data array', () => pm.expect(json.data).to.be.an('array'));",
                 "pm.test('Contains created expense', () => {",
                 "  const id = parseInt(pm.collectionVariables.get('expenseId'));",
-                "  const found = pm.response.json().find(e => e.id === id);",
+                "  const found = json.data.find(e => e.id === id);",
                 "  pm.expect(found).to.exist;",
                 "});"
               ]
@@ -285,7 +286,7 @@
             "url": "{{baseUrl}}/api/budgets",
             "body": {
               "mode": "raw",
-              "raw": "{ \"category_id\": {{categoryId}}, \"amount\": 500 }"
+              "raw": "{ \"category_id\": {{categoryId}}, \"amount\": 500, \"year\": 2024, \"month\": 1 }"
             }
           },
           "event": [{
@@ -309,7 +310,15 @@
           "request": {
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/api/budgets"
+            "url": {
+              "raw": "{{baseUrl}}/api/budgets?year=2024&month=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "budgets"],
+              "query": [
+                { "key": "year",  "value": "2024" },
+                { "key": "month", "value": "1" }
+              ]
+            }
           },
           "event": [{
             "listen": "test",
@@ -317,7 +326,12 @@
               "type": "text/javascript",
               "exec": [
                 "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                "pm.test('Returns an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                "pm.test('Returns an array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                "pm.test('Contains the budget', () => {",
+                "  const id = parseInt(pm.collectionVariables.get('budgetId'));",
+                "  const found = pm.response.json().find(b => b.id === id);",
+                "  pm.expect(found).to.exist;",
+                "});"
               ]
             }
           }]

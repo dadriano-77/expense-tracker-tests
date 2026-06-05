@@ -145,10 +145,7 @@ jobs:
           target: 'http://localhost:3001'
           cmd_options: '-I'
           fail_action: false
-          issue_title: ''
           token: ${{ secrets.GITHUB_TOKEN }}
-          rules_file_name: '.zap/rules.tsv'
-          artifact_name: ''
 
       - name: Move ZAP JSON to reports dir
         if: always()
