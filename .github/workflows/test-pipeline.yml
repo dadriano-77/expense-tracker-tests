@@ -146,6 +146,7 @@ jobs:
           cmd_options: '-I'
           fail_action: false
           token: ${{ secrets.GITHUB_TOKEN }}
+          rules_file_name: '.zap/rules.tsv'
 
       - name: Move ZAP JSON to reports dir
         if: always()
