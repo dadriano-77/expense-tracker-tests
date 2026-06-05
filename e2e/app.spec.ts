@@ -59,7 +59,7 @@ test.describe('Categories', () => {
 
   test('creates a new category', async ({ page }) => {
     const name = `Cat_${Date.now()}`;
-    await page.fill('input[name=name]', name);
+    await page.fill('input[placeholder="Name"]', name);
     await page.click('button[type=submit]');
     await expect(page.locator('ul, .data-list').getByText(name)).toBeVisible({ timeout: 5000 });
   });
@@ -78,7 +78,7 @@ test.describe('Expenses', () => {
   test('creates an expense after adding a category', async ({ page }) => {
     await page.goto('/categories');
     const catName = `E2eCat_${Date.now()}`;
-    await page.fill('input[name=name]', catName);
+    await page.fill('input[placeholder="Name"]', catName);
     await page.click('button[type=submit]');
     await expect(page.locator('ul, .data-list').getByText(catName)).toBeVisible({ timeout: 5000 });
 

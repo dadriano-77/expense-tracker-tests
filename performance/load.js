@@ -60,9 +60,10 @@ export default function () {
     'Authorization': `Bearer ${token}`,
   };
 
+  const catName = `Food_${__VU}_${__ITER}`;
   const catRes = http.post(
     `${BASE}/api/categories`,
-    JSON.stringify({ name: 'Food', color: '#FF5733' }),
+    JSON.stringify({ name: catName, color: '#FF5733' }),
     { headers },
   );
   check(catRes, { 'create category 200/201': r => [200, 201].includes(r.status) });
