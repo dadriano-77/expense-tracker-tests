@@ -6,6 +6,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
     ports:
       - "3001:3001"
+    restart: unless-stopped
     networks:
       - expense-tracker-net
 
@@ -15,6 +16,7 @@ services:
       - "5173:80"
     depends_on:
       - backend
+    restart: unless-stopped
     networks:
       - expense-tracker-net
 

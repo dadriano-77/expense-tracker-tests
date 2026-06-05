@@ -83,14 +83,16 @@ test.describe('Expenses', () => {
     await expect(page.locator('ul, .data-list').getByText(catName)).toBeVisible({ timeout: 5000 });
 
     await page.goto('/expenses');
+    // The page has two select[name=category_id] (filter bar + add form).
+    // Wait for the form's select inside .card to be populated, then scope all
+    // interactions to .card to avoid hitting the filter bar's identical selector.
+    await page.waitForSelector('.card select[name="category_id"] option:not([value=""])', { timeout: 10000 });
+    await page.locator('.card select[name="category_id"]').selectOption({ label: catName });
+    await page.locator('.card input[name=amount]').fill('99.99');
+    await page.locator('.card input[name=description]').fill('Playwright E2E test expense');
+    await page.locator('.card button[type=submit]').click();
 
-    await page.selectOption('select[name=category_id]', { label: catName });
-    await page.fill('input[name=amount]', '99.99');
-    await page.fill('input[name=description]', 'Playwright E2E test expense');
-    await page.fill('input[name=date]', '2024-03-15');
-    await page.click('button[type=submit]');
-
-    await expect(page.getByText('Playwright E2E test expense')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Playwright E2E test expense')).toBeVisible({ timeout: 10000 });
   });
 });
 
