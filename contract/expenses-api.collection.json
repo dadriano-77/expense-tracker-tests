@@ -3,28 +3,341 @@
     "name": "Expense Tracker API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "variable": [
+    { "key": "baseUrl",  "value": "http://localhost:3001" },
+    { "key": "token",    "value": "" },
+    { "key": "expenseId",    "value": "" },
+    { "key": "categoryId",   "value": "" },
+    { "key": "budgetId",     "value": "" }
+  ],
   "item": [
     {
-      "name": "Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{baseUrl}}/health",
-          "host": ["{{baseUrl}}"],
-          "path": ["health"]
-        }
-      },
-      "event": [
+      "name": "Health",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "exec": [
-              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-              "pm.test('Body has status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Body has status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /api/auth/register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"contractuser\", \"password\": \"Test1234!\" }"
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const json = pm.response.json();",
+                "pm.test('Status 200 or 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                "pm.test('Returns a JWT token', () => {",
+                "  pm.expect(json).to.have.property('token');",
+                "  pm.collectionVariables.set('token', json.token);",
+                "});"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"username\": \"contractuser\", \"password\": \"Test1234!\" }"
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const json = pm.response.json();",
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Returns a JWT token', () => {",
+                "  pm.expect(json).to.have.property('token');",
+                "  pm.collectionVariables.set('token', json.token);",
+                "});"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "POST /api/categories — create",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
             ],
-            "type": "text/javascript"
-          }
+            "url": "{{baseUrl}}/api/categories",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"name\": \"Food\", \"color\": \"#FF5733\" }"
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const json = pm.response.json();",
+                "pm.test('Status 200 or 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                "pm.test('Has id', () => {",
+                "  pm.expect(json).to.have.property('id');",
+                "  pm.collectionVariables.set('categoryId', json.id);",
+                "});",
+                "pm.test('Has name', () => pm.expect(json.name).to.eql('Food'));"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /api/categories",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/categories"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Returns an array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                "pm.test('Contains created category', () => {",
+                "  const found = pm.response.json().find(c => c.name === 'Food');",
+                "  pm.expect(found).to.exist;",
+                "});"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "Expenses",
+      "item": [
+        {
+          "name": "POST /api/expenses — create",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/expenses",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"amount\": 42.50, \"description\": \"Lunch\", \"category_id\": {{categoryId}}, \"date\": \"2024-01-15\" }"
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const json = pm.response.json();",
+                "pm.test('Status 200 or 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                "pm.test('Has id', () => {",
+                "  pm.expect(json).to.have.property('id');",
+                "  pm.collectionVariables.set('expenseId', json.id);",
+                "});",
+                "pm.test('Amount matches', () => pm.expect(Number(json.amount)).to.eql(42.50));"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /api/expenses",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/expenses"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Returns an array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                "pm.test('Contains created expense', () => {",
+                "  const id = parseInt(pm.collectionVariables.get('expenseId'));",
+                "  const found = pm.response.json().find(e => e.id === id);",
+                "  pm.expect(found).to.exist;",
+                "});"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /api/expenses/:id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/expenses/{{expenseId}}"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Id matches', () => {",
+                "  const json = pm.response.json();",
+                "  pm.expect(json.id).to.eql(parseInt(pm.collectionVariables.get('expenseId')));",
+                "});"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "PUT /api/expenses/:id",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/expenses/{{expenseId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"amount\": 55.00, \"description\": \"Dinner\", \"category_id\": {{categoryId}}, \"date\": \"2024-01-15\" }"
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Amount updated', () => {",
+                "  const json = pm.response.json();",
+                "  pm.expect(Number(json.amount)).to.eql(55.00);",
+                "});"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "DELETE /api/expenses/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/expenses/{{expenseId}}"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200 or 204', () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"
+              ]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "Budgets",
+      "item": [
+        {
+          "name": "PUT /api/budgets — upsert",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/api/budgets",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"category_id\": {{categoryId}}, \"amount\": 500 }"
+            }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const json = pm.response.json();",
+                "pm.test('Status 200 or 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                "pm.test('Has id', () => {",
+                "  pm.expect(json).to.have.property('id');",
+                "  pm.collectionVariables.set('budgetId', json.id);",
+                "});",
+                "pm.test('Amount is 500', () => pm.expect(Number(json.amount)).to.eql(500));"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "GET /api/budgets",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/budgets"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                "pm.test('Returns an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "DELETE /api/budgets/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "{{baseUrl}}/api/budgets/{{budgetId}}"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.test('Status 200 or 204', () => pm.expect(pm.response.code).to.be.oneOf([200, 204]));"
+              ]
+            }
+          }]
         }
       ]
     }
