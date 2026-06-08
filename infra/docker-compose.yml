@@ -7,6 +7,8 @@ services:
     ports:
       - "3001:3001"
     restart: unless-stopped
+    volumes:
+      - backend-db:/app/server/data
     networks:
       - expense-tracker-net
 
@@ -22,3 +24,6 @@ services:
 
 networks:
   expense-tracker-net:
+
+volumes:
+  backend-db:

@@ -83,10 +83,19 @@ test.describe('Expenses', () => {
     await expect(page.locator('ul, .data-list').getByText(catName)).toBeVisible({ timeout: 5000 });
 
     await page.goto('/expenses');
-    // The page has two select[name=category_id] (filter bar + add form).
-    // Wait for the form's select inside .card to be populated, then scope all
-    // interactions to .card to avoid hitting the filter bar's identical selector.
-    await page.waitForSelector('.card select[name="category_id"] option:not([value=""])', { timeout: 10000 });
+    // The page has two select[name=category_id] (filter bar + add form). Scope all
+    // interactions to .card (the Add Expense card) to avoid hitting the filter select.
+    // Use waitForFunction instead of waitForSelector: <option> elements inside a
+    // collapsed <select> are never "visible", so waitForSelector always times out.
+    await page.waitForFunction(
+      (name) => {
+        const card = document.querySelector('.card');
+        const select = card?.querySelector('select[name="category_id"]');
+        return select ? Array.from(select.options).some(o => o.text === name) : false;
+      },
+      catName,
+      { timeout: 10000 },
+    );
     await page.locator('.card select[name="category_id"]').selectOption({ label: catName });
     await page.locator('.card input[name=amount]').fill('99.99');
     await page.locator('.card input[name=description]').fill('Playwright E2E test expense');
