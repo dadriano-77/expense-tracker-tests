@@ -1,0 +1,121 @@
+stages:
+  - test
+
+test-pipeline:
+  stage: test
+  image: node:20
+  tags:
+    - docker
+  variables:
+    PLAYWRIGHT_HTML_REPORT: ../reports/e2e
+    BASE_URL: http://localhost:5173
+
+  before_script:
+    # ── Docker CLI + Compose v2 ─────────────────────────────────────────────────
+    - |
+      apt-get update -qq
+      apt-get install -y -qq ca-certificates curl
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" | tee /etc/apt/sources.list.d/docker.list
+      apt-get update -qq && apt-get install -y -qq docker-ce-cli docker-compose-plugin
+    # ── k6 ──────────────────────────────────────────────────────────────────────
+    - |
+      curl -s https://dl.k6.io/key.gpg | gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+      echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | tee /etc/apt/sources.list.d/k6.list
+      apt-get update -qq && apt-get install -y -qq k6
+    # ── Newman + Playwright ─────────────────────────────────────────────────────
+    - npm install -g newman newman-reporter-htmlextra
+    - npm ci --prefix e2e
+    - npx --prefix e2e playwright install --with-deps chromium
+    # ── Report dirs ─────────────────────────────────────────────────────────────
+    - mkdir -p reports/contract reports/e2e reports/performance reports/security
+    # ── Resolve image defaults ───────────────────────────────────────────────────
+    - BACKEND_IMAGE="${BACKEND_IMAGE:-registry.gitlab.com/dadriano2/expense-tracker/backend:latest}"
+    - FRONTEND_IMAGE="${FRONTEND_IMAGE:-registry.gitlab.com/dadriano2/expense-tracker/frontend:latest}"
+    # ── Start app containers ─────────────────────────────────────────────────────
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - BACKEND_IMAGE=$BACKEND_IMAGE FRONTEND_IMAGE=$FRONTEND_IMAGE JWT_SECRET=$JWT_SECRET docker compose -f infra/docker-compose.yml up -d
+    - |
+      for i in $(seq 1 30); do
+        curl -sf http://localhost:3001/health && echo "Backend ready" && break
+        echo "Waiting ($i/30)..." && sleep 2
+      done
+      curl -sf http://localhost:3001/health || { docker compose -f infra/docker-compose.yml logs; exit 1; }
+
+  script:
+    - FAILED=0; NEWMAN_S=PASS; PW_S=PASS; K6_S=PASS
+
+    # ── Contract Tests (Newman) ──────────────────────────────────────────────────
+    - |
+      newman run contract/expenses-api.collection.json \
+        --env-var baseUrl=http://localhost:3001 \
+        --reporters cli,htmlextra,json \
+        --reporter-htmlextra-export reports/contract/report.html \
+        --reporter-json-export reports/contract/expenses-results.json \
+        --color on
+      NEWMAN_EC=$?
+      [ $NEWMAN_EC -eq 0 ] || NEWMAN_S=FAIL
+      [ $NEWMAN_EC -eq 0 ] || FAILED=1
+
+    # ── E2E Tests (Playwright) ───────────────────────────────────────────────────
+    - |
+      cd e2e
+      npx playwright test --config playwright.config.ts
+      PW_EC=$?
+      cd ..
+      [ $PW_EC -eq 0 ] || PW_S=FAIL
+      [ $PW_EC -eq 0 ] || FAILED=1
+
+    # ── Performance Tests (k6) ───────────────────────────────────────────────────
+    - |
+      k6 run \
+        --env BASE_URL=http://localhost:3001 \
+        --summary-export=reports/performance/summary.json \
+        performance/load.js
+      K6_EC=$?
+      [ $K6_EC -eq 0 ] || K6_S=FAIL
+      [ $K6_EC -eq 0 ] || FAILED=1
+
+    # ── Security Scan (OWASP ZAP) — never fails the pipeline ────────────────────
+    - |
+      docker run --rm --network host \
+        -v zap-reports:/zap/wrk \
+        ghcr.io/zaproxy/zaproxy:stable \
+        zap-baseline.py -t http://localhost:3001 -I -J zap-report.json \
+        2>&1 | tee reports/security/zap-output.log || true
+      docker run --rm -v zap-reports:/data alpine \
+        cat /data/zap-report.json > reports/security/zap-report.json 2>/dev/null || true
+      docker volume rm zap-reports || true
+
+    # ── Write pipeline metadata for HTML report ──────────────────────────────────
+    - |
+      OVERALL=$([ $FAILED -eq 0 ] && echo PASS || echo FAIL)
+      node -e "
+        const fs = require('fs');
+        fs.writeFileSync('reports/pipeline-run.json', JSON.stringify({
+          runAt: new Date().toISOString(),
+          durationMs: 0,
+          overallStatus: '${OVERALL}',
+          stages: [
+            { name: 'Contract Tests (Newman)',   status: '${NEWMAN_S}', durationMs: 0 },
+            { name: 'E2E Tests (Playwright)',     status: '${PW_S}',    durationMs: 0 },
+            { name: 'Performance Tests (k6)',     status: '${K6_S}',    durationMs: 0 },
+            { name: 'Security Scan (OWASP ZAP)', status: 'SKIP',        durationMs: 0 },
+          ]
+        }, null, 2));
+      "
+    - node generate-report.js reports
+
+    # ── Propagate test failures ──────────────────────────────────────────────────
+    - exit $FAILED
+
+  after_script:
+    - docker compose -f infra/docker-compose.yml down --volumes || true
+
+  artifacts:
+    when: always
+    paths:
+      - reports/
+    expire_in: 30 days
