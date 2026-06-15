@@ -34,15 +34,23 @@ test-pipeline:
     # ── Resolve image defaults ───────────────────────────────────────────────────
     - BACKEND_IMAGE="${BACKEND_IMAGE:-registry.gitlab.com/dadriano2/expense-tracker/backend:latest}"
     - FRONTEND_IMAGE="${FRONTEND_IMAGE:-registry.gitlab.com/dadriano2/expense-tracker/frontend:latest}"
-    # ── Start app containers ─────────────────────────────────────────────────────
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - BACKEND_IMAGE=$BACKEND_IMAGE FRONTEND_IMAGE=$FRONTEND_IMAGE JWT_SECRET=$JWT_SECRET docker compose -f infra/docker-compose.yml up -d
+    # ── Start app (or reuse existing staging deployment) ────────────────────────
     - |
-      for i in $(seq 1 30); do
-        curl -sf http://localhost:3001/health && echo "Backend ready" && break
-        echo "Waiting ($i/30)..." && sleep 2
-      done
-      curl -sf http://localhost:3001/health || { docker compose -f infra/docker-compose.yml logs; exit 1; }
+      if curl -sf http://localhost:3001/health 2>/dev/null; then
+        echo "Staging deployment detected — running tests against existing app"
+        echo "external" > /tmp/deploy-mode
+      else
+        echo "No running app found — starting containers for this test run"
+        docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+        BACKEND_IMAGE=$BACKEND_IMAGE FRONTEND_IMAGE=$FRONTEND_IMAGE JWT_SECRET=$JWT_SECRET \
+          docker compose -f infra/docker-compose.yml -p expense-tracker-test up -d
+        echo "self" > /tmp/deploy-mode
+        for i in $(seq 1 30); do
+          curl -sf http://localhost:3001/health && echo "Backend ready" && break
+          echo "Waiting ($i/30)..." && sleep 2
+        done
+        curl -sf http://localhost:3001/health || { docker compose -p expense-tracker-test logs; exit 1; }
+      fi
 
   script:
     - FAILED=0; NEWMAN_S=PASS; PW_S=PASS; K6_S=PASS
@@ -112,7 +120,10 @@ test-pipeline:
     - exit $FAILED
 
   after_script:
-    - docker compose -f infra/docker-compose.yml down --volumes || true
+    - |
+      if [ "$(cat /tmp/deploy-mode 2>/dev/null)" = "self" ]; then
+        docker compose -f infra/docker-compose.yml -p expense-tracker-test down --volumes || true
+      fi
 
   artifacts:
     when: always
