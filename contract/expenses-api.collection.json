@@ -53,11 +53,16 @@
               "type": "text/javascript",
               "exec": [
                 "const json = pm.response.json();",
-                "pm.test('Status 200 or 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
-                "pm.test('Returns a JWT token', () => {",
-                "  pm.expect(json).to.have.property('token');",
-                "  pm.collectionVariables.set('token', json.token);",
-                "});"
+                "// 409 means the user already exists from a prior run — login step will supply the token",
+                "pm.test('Status 200, 201, or 409 (already registered)', () => {",
+                "  pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]);",
+                "});",
+                "if (pm.response.code !== 409) {",
+                "  pm.test('Returns a JWT token', () => {",
+                "    pm.expect(json).to.have.property('token');",
+                "    pm.collectionVariables.set('token', json.token);",
+                "  });",
+                "}"
               ]
             }
           }]
@@ -113,12 +118,17 @@
               "type": "text/javascript",
               "exec": [
                 "const json = pm.response.json();",
-                "pm.test('Status 200 or 201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
-                "pm.test('Has id', () => {",
-                "  pm.expect(json).to.have.property('id');",
-                "  pm.collectionVariables.set('categoryId', json.id);",
+                "// 409 means category exists from a prior run — GET /api/categories below will supply the id",
+                "pm.test('Status 200, 201, or 409 (already exists)', () => {",
+                "  pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]);",
                 "});",
-                "pm.test('Has name', () => pm.expect(json.name).to.eql('Food'));"
+                "if (pm.response.code !== 409) {",
+                "  pm.test('Has id', () => {",
+                "    pm.expect(json).to.have.property('id');",
+                "    pm.collectionVariables.set('categoryId', json.id);",
+                "  });",
+                "  pm.test('Has name', () => pm.expect(json.name).to.eql('Food'));",
+                "}"
               ]
             }
           }]
@@ -140,6 +150,8 @@
                 "pm.test('Contains created category', () => {",
                 "  const found = pm.response.json().find(c => c.name === 'Food');",
                 "  pm.expect(found).to.exist;",
+                "  // Always sync categoryId from the list — ensures it is set even when create returned 409",
+                "  pm.collectionVariables.set('categoryId', found.id);",
                 "});"
               ]
             }
