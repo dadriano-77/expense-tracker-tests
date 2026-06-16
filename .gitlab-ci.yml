@@ -53,7 +53,7 @@ test-pipeline:
       fi
 
   script:
-    - FAILED=0; NEWMAN_S=PASS; PW_S=PASS; K6_S=PASS
+    - FAILED=0; NEWMAN_S=PASS; PW_S=PASS; K6_S=PASS; ZAP_S=SKIP
 
     # ── Contract Tests (Newman) ──────────────────────────────────────────────────
     - |
@@ -88,14 +88,17 @@ test-pipeline:
 
     # ── Security Scan (OWASP ZAP) — never fails the pipeline ────────────────────
     - |
+      docker run --rm -v zap-reports:/zap/wrk alpine chmod 777 /zap/wrk
       docker run --rm --network host \
         -v zap-reports:/zap/wrk \
         ghcr.io/zaproxy/zaproxy:stable \
         zap-baseline.py -t http://localhost:3001 -I -J zap-report.json \
-        2>&1 | tee reports/security/zap-output.log || true
+        2>&1 | tee reports/security/zap-output.log
+      ZAP_EC=$?
       docker run --rm -v zap-reports:/data alpine \
         cat /data/zap-report.json > reports/security/zap-report.json 2>/dev/null || true
       docker volume rm zap-reports || true
+      [ $ZAP_EC -eq 0 ] && ZAP_S=PASS || ZAP_S=WARN
 
     # ── Write pipeline metadata for HTML report ──────────────────────────────────
     - |
@@ -110,7 +113,7 @@ test-pipeline:
             { name: 'Contract Tests (Newman)',   status: '${NEWMAN_S}', durationMs: 0 },
             { name: 'E2E Tests (Playwright)',     status: '${PW_S}',    durationMs: 0 },
             { name: 'Performance Tests (k6)',     status: '${K6_S}',    durationMs: 0 },
-            { name: 'Security Scan (OWASP ZAP)', status: 'SKIP',        durationMs: 0 },
+            { name: 'Security Scan (OWASP ZAP)', status: '${ZAP_S}',    durationMs: 0 },
           ]
         }, null, 2));
       "
