@@ -40,11 +40,14 @@ function login(username) {
 }
 
 export function setup() {
-  register(`perf_setup_${Date.now()}`);
+  const runId = Date.now();
+  register(`perf_setup_${runId}`);
+  return { runId };
 }
 
-export default function () {
-  const username = `perf_${__VU}_${__ITER}`;
+export default function (data) {
+  const runId    = data.runId;
+  const username = `perf_${runId}_${__VU}_${__ITER}`;
 
   register(username);
 
@@ -60,7 +63,7 @@ export default function () {
     'Authorization': `Bearer ${token}`,
   };
 
-  const catName = `Food_${__VU}_${__ITER}`;
+  const catName = `Cat_${runId}_${__VU}_${__ITER}`;
   const catRes = http.post(
     `${BASE}/api/categories`,
     JSON.stringify({ name: catName, color: '#FF5733' }),
